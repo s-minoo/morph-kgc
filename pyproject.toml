@@ -39,7 +39,8 @@ classifiers = [
 requires-python = '>=3.10'
 dynamic = ['version']
 dependencies = [
-  'pandas>=2.1.0',
+  'numpy>=2.0.0',
+  'pandas>=2.2.2',
   'rdflib>=7.3.0',
   'pyoxigraph>=0.5.11',
   'ruamel.yaml>=0.18.0',
@@ -56,14 +57,14 @@ morph-kgc = 'morph_kgc.__main__:main'
 path = 'src/morph_kgc/_version.py'
 
 [project.optional-dependencies]
-test = ['pytest>=8.0.0', 'SQLAlchemy>=2.0.0', 'openpyxl>=3.0.0', 'odfpy>=1.4.1', 'pyarrow>=14.0.0', 'geopandas>=1.0.0']
+test = ['pytest>=8.0.0', 'SQLAlchemy>=2.0.0', 'openpyxl>=3.0.0', 'odfpy>=1.4.1', 'pyarrow>=16.0.0', 'geopandas>=1.0.0']
 sqlite = ['SQLAlchemy>=2.0.0']
 mysql = ['pymysql>=1.1.0', 'cryptography>=42.0.0', 'SQLAlchemy>=2.0.0']
 postgresql = ['psycopg[binary]>=3.0.0', 'SQLAlchemy>=2.0.0']
 oracle = ['oracledb>=2.5.0', 'SQLAlchemy>=2.0.0']
 mssql = ['pymssql>=2.2.7', 'SQLAlchemy>=2.0.0']
 excel = ['openpyxl>=3.0.0', 'odfpy>=1.4.1']
-tabular = ['pyarrow>=14.0.0']
+tabular = ['pyarrow>=16.0.0']
 geoparquet = ['geopandas>=1.0.0']
 spss = ['pyreadstat>=1.2.0']
 neo4j = ['neo4j>=5.20.0']
