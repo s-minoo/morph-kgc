@@ -34,14 +34,13 @@ LOGGER = logging.getLogger("morph_kgc")
 # ---------------------------------------------------------------------------
 # Valid option sets.
 # ---------------------------------------------------------------------------
-VALID_OUTPUT_FORMATS = {"N-TRIPLES", "N-QUADS", "JELLY"}
-VALID_LOGGING_LEVELS = {"NOTSET", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+from ..constants.output import (
+    OUTPUT_FORMAT_FILE_EXTENSION,
+    VALID_OUTPUT_FORMATS,
+    VALID_LOGGING_LEVEL,
+)
+
 VALID_PARTITIONING = {"PARTIAL-AGGREGATIONS", "MAXIMAL", "NO", "FALSE", "OFF", "0"}
-OUTPUT_FORMAT_FILE_EXTENSION = {
-    "N-TRIPLES": ".nt",
-    "N-QUADS": ".nq",
-    "JELLY": ".jelly",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -290,10 +289,10 @@ class MorphConfig:
             )
 
     def _validate_logging_level(self) -> None:
-        if self.logging_level not in VALID_LOGGING_LEVELS:
+        if self.logging_level not in VALID_LOGGING_LEVEL:
             raise ValueError(
                 f"'logging_level' value '{self.logging_level}' is not valid. "
-                f"Must be one of: {sorted(VALID_LOGGING_LEVELS)}."
+                f"Must be one of: {sorted(VALID_LOGGING_LEVEL)}."
             )
 
     def _validate_mapping_partitioning(self) -> None:
