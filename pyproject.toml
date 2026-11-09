@@ -71,6 +71,7 @@ neo4j = ['neo4j>=5.20.0']
 snowflake =['snowflake-sqlalchemy>=1.7.3']
 databricks =['databricks-sqlalchemy>=2.0.4']
 jelly = ["pyjelly>=0.6.2"]
+pyarrow = ["pyarrow>=25.0.1"]
 all = [
   'morph_kgc[mysql]',
   'morph_kgc[postgresql]',
@@ -85,4 +86,5 @@ all = [
   'morph_kgc[databricks]',
   'morph_kgc[geoparquet]',
   'morph_kgc[jelly]',
+  'morph_kgc[pyarrow]'
 ]
