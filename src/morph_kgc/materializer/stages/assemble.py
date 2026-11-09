@@ -22,7 +22,7 @@ from ...mapping.model import RMLRule, RMLMapping
 from .terms import _apply_template, _apply_fnml
 
 
-def assemble_triples(
+def resolve_graph(
     data: pd.DataFrame,
     rule: RMLRule,
     rml_mapping: RMLMapping,
@@ -30,12 +30,9 @@ def assemble_triples(
     nest_level: int = 0,
 ) -> pd.DataFrame:
     """
-    Write ``data['triple']`` as ``subject predicate object``.
-    At nest_level 0 with N-Quads output, also appends the graph term.
-    Drops the individual subject/predicate/object columns afterwards.
+    Write the graph term of *rule* into ``data['_graph']``.
+    The default graph (or no graph map) yields an empty string.
     """
-    data["triple"] = data["subject"] + " " + data["predicate"] + " " + data["object"]
-
     if nest_level == 0 and config.output_format == NQUADS:
         gm = rule.graph
         if (
@@ -52,6 +49,32 @@ def assemble_triples(
             )
         else:
             data["_graph"] = ""
-        data["triple"] = data["triple"] + " " + data["_graph"]
+    return data
 
-    return data.drop(columns=["subject", "predicate", "object"], errors="ignore")
+def concatenate_terms(data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Write ``data['triple']`` as ``subject predicate object``, followed by the
+    graph term when a ``_graph`` column is present, and drop those columns.
+    """
+    data["triple"] = data["subject"] + " " + data["predicate"] + " " + data["object"]
+    if "_graph" in data.columns:
+        data["triple"] = data["triple"] + " " + data["_graph"]
+    return data.drop(
+        columns=["subject", "predicate", "object", "_graph"], errors="ignore"
+    )
+
+def assemble_triples(
+    data: pd.DataFrame,
+    rule: RMLRule,
+    rml_mapping: RMLMapping,
+    config,
+    nest_level: int = 0,
+) -> pd.DataFrame:
+    """
+    Write ``data['triple']`` as ``subject predicate object``.
+    At nest_level 0 with N-Quads output, also appends the graph term.
+    Drops the individual subject/predicate/object columns afterwards.
+    """
+
+    data = resolve_graph(data, rule, rml_mapping, config, nest_level)
+    return concatenate_terms(data)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from morph_kgc.constants.output import VORTEX_RDF
+
 __author__ = "Julián Arenas-Guerrero"
 __license__ = "Apache-2.0"
 
@@ -22,12 +24,16 @@ Section B — Top-level pipeline orchestration
     materialize_pipeline()                  full pipeline, returns Graph | Store | set
 """
 
+TERM_COLUMNS = ["subject", "predicate", "object", "graph"]
 import logging
 from io import BytesIO
 
+import pyarrow as pa 
 import pandas as pd
+import vortex_rdf as vrdf
 from rdflib import Dataset, Graph
 
+from ..config.model import MorphConfig
 from ..constants import (
     LOGGING_NAMESPACE,
     NQUADS,
@@ -43,13 +49,23 @@ from .stages.load import load_data
 from .stages.references import collect_references, collect_parent_references_in_join_conditions
 from .stages.terms import materialize_terms
 from .stages.join import merge_data
-from .stages.assemble import assemble_triples
+from .stages.assemble import assemble_triples, resolve_graph
 
 LOGGER = logging.getLogger(LOGGING_NAMESPACE)
 
 # =============================================================================
 # Section A — Group-level materialization
 # =============================================================================
+
+
+def _rule_chains(rule: RMLRule, rml_mapping: RMLMapping) -> list[list[RMLRule] | None]: 
+    object_map = rule.object_
+
+    if object_map is not None and object_map.map_type == RML_TRIPLE_TERM_MAP:
+        return _triple_term_chains(object_map, rml_mapping)
+    
+    return [None]
+
 
 def _triple_term_chains(term_map, rml_mapping: RMLMapping) -> list[list[RMLRule]]:
     """
@@ -80,6 +96,46 @@ def _triple_term_chains(term_map, rml_mapping: RMLMapping) -> list[list[RMLRule]
 
     return chains
 
+def materialize_rule_dataframe(
+    rule: RMLRule,
+    rml_mapping: RMLMapping,
+    config,
+    python_source=None,
+    nest_level: int = 0,
+    ) -> pd.DataFrame: 
+    """
+    Materialize one RML rule into a DataFrame of RDF terms, without
+    concatenating them into N-Triples / N-Quads strings.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``subject``, ``predicate``, ``object``, ``graph``, each holding
+        a serialized RDF term. ``graph`` is ``""`` for the default graph and is
+        resolved regardless of ``config.output_format``. Rows with a missing
+        term are dropped and duplicate rows removed.
+    """
+    frames = []
+    for chain in _rule_chains(rule, rml_mapping):
+        data = _materialize_terms_and_joins(rule, rml_mapping, config, python_source, nest_level, chain)
+        if data.empty:
+            continue
+        data = resolve_graph(data, rule, rml_mapping, config)
+        if not "_graph" in data:
+            data['_graph'] = ""
+            data = data[["subject", "predicate", "object", "_graph"]].rename(columns={"_graph": "g"})
+
+        data = data.rename(columns={"subject": "s", "predicate": "p", "object": "o"})
+        frames.append(data)
+
+    if not frames:
+        return pd.DataFrame(columns=TERM_COLUMNS)
+
+    return (
+        pd.concat(frames, ignore_index=True)
+        .dropna()
+        .drop_duplicates(ignore_index=True)
+    )
 
 def materialize_rule(
     rule: RMLRule,
@@ -111,18 +167,12 @@ def materialize_rule(
         Each element is a complete, serialized N-Triple / N-Quad line
         (without a trailing newline).
     """
-    object_map = rule.object_
-
-    if object_map is not None and object_map.map_type == RML_TRIPLE_TERM_MAP:
-        # one pass per triple term the base triples map contributes
-        triples: set[str] = set()
-        for chain in _triple_term_chains(object_map, rml_mapping):
-            triples |= _materialize(
-                rule, rml_mapping, config, python_source, nest_level, chain,
-            )
-        return triples
-
-    return _materialize(rule, rml_mapping, config, python_source, nest_level, None)
+    triples: set[str] = set()
+    for chain in _rule_chains(rule, rml_mapping):
+        triples |= _materialize(
+            rule, rml_mapping, config, python_source, nest_level, chain,
+        )
+    return triples
 
 
 def _join_triple_term_chain(
@@ -177,21 +227,20 @@ def _join_triple_term_chain(
     return data, aliases
 
 
-def _materialize(
+def _materialize_terms_and_joins(
     rule: RMLRule,
     rml_mapping: RMLMapping,
     config,
     python_source,
     nest_level: int,
     triple_term_chain: list[RMLRule] | None,
-) -> set[str]:
-    """Materialize *rule*, building one specific triple term when given a chain."""
+) -> pd.DataFrame:
     references = collect_references(rule, rml_mapping)
 
     if references:
         data = load_data(config, rule, references, python_source, rml_mapping)
         if data.empty:
-            return set()
+            return pd.DataFrame(columns=TERM_COLUMNS)
     else:
         # All term maps are constant-valued, so every iteration of the logical
         # source yields the same statements: a single row stands in for all of
@@ -206,7 +255,7 @@ def _materialize(
             data, rule, triple_term_chain, rml_mapping, config, python_source,
         )
         if data.empty:
-            return set()
+            return pd.DataFrame(columns=TERM_COLUMNS)
         data = materialize_terms(
             data, rule, rml_mapping, config,
             triple_term_chain=triple_term_chain, triple_term_aliases=aliases,
@@ -223,11 +272,46 @@ def _materialize(
 
     else:
         data = materialize_terms(data, rule, rml_mapping, config)
+        
+    return data
 
+
+def _materialize(
+    rule: RMLRule,
+    rml_mapping: RMLMapping,
+    config,
+    python_source,
+    nest_level: int,
+    triple_term_chain: list[RMLRule] | None,
+) -> set[str]:
+    """Materialize *rule*, building one specific triple term when given a chain."""
+
+    data = _materialize_terms_and_joins(rule, rml_mapping, config, python_source, nest_level, triple_term_chain) 
     data = assemble_triples(data, rule, rml_mapping, config, nest_level=nest_level)
 
     return set(data["triple"].dropna().unique())
 
+
+def materialize_group_to_dataframe(
+    group: list[RMLRule],
+    rml_mapping: RMLMapping,
+    config,
+    python_source=None,
+) -> pd.DataFrame:
+    """
+    Materialize one mapping partition into a DataFrame with columns
+    ``subject``, ``predicate``, ``object``, ``graph`` (see
+    materialize_rml_rule_dataframe), without duplicate rows.
+    """
+    frames = list() 
+    for rule in group: 
+        frame = materialize_rule_dataframe(rule, rml_mapping, config, python_source)
+        if not frame.empty: 
+            frames.append(frame)
+
+    if not frames:
+        return pd.DataFrame(columns=TERM_COLUMNS)
+    return pd.concat(frames, ignore_index=True).drop_duplicates(ignore_index=True)
 
 def materialize_group_to_set(
     group: list[RMLRule],
@@ -245,22 +329,31 @@ def materialize_group_to_set(
 def materialize_group_to_file(
     group: list[RMLRule],
     rml_mapping: RMLMapping,
-    config,
+    config: MorphConfig,
     python_source=None,
 ) -> int:
     """
     Materialize one mapping partition and write results directly to the
     output file configured in *config*. Returns the number of triples written.
     """
-    triples = materialize_group_to_set(group, rml_mapping, config, python_source)
-    if not triples:
-        return 0
-
     # Rules are partitioned by mapping_partition, so every rule in the group
     # writes to the same file. With no output_dir the name is ignored and all
     # groups append to the single configured output file.
     mapping_group = group[0].mapping_partition if group else None
     output_path = config.get_output_file_path(mapping_group)
+
+    if config.output_format == VORTEX_RDF: 
+        df = materialize_group_to_dataframe(group, rml_mapping, config, python_source)
+        arrow = pa.Table.from_pandas(df)
+        vortex = vrdf.VortexRdfStore.from_pyarrow(arrow)
+        with open(output_path, "wb") as fh:
+            fh.write(vortex.to_bytes())
+
+        return len(vortex)
+
+    triples = materialize_group_to_set(group, rml_mapping, config, python_source)
+    if not triples:
+        return 0
 
     # The materialized triples carry no statement terminator, and in N-Quads
     # output they end with the graph term, which is empty for the default graph.
